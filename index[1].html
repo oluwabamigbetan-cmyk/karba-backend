@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KARBA Admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#0B1A3B; color:#fff; }
+    .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; }
+    .btn { background:#D4AF37; color:#0B1A3B; border-radius:10px; padding:10px 16px; font-weight:600; }
+    select, input { background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:8px 10px; color:#fff; outline:none; }
+    a { color:#EEDC82; }
+  </style>
+</head>
+<body>
+  <div class="max-w-5xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-semibold text-[#D4AF37]">KARBA Admin</h1>
+      <div id="userBox" class="text-sm"></div>
+    </header>
+
+    <section id="loginCard" class="card p-6 max-w-md">
+      <h2 class="text-xl font-semibold mb-4">Admin Login</h2>
+      <label class="block mb-2 text-sm">Email</label>
+      <input id="email" type="email" class="w-full mb-3" placeholder="admin@example.com">
+      <label class="block mb-2 text-sm">Password</label>
+      <input id="password" type="password" class="w-full mb-4" placeholder="••••••••">
+      <button id="btnLogin" class="btn w-full">Login</button>
+      <p id="loginMsg" class="text-sm mt-3 text-red-300"></p>
+    </section>
+
+    <section id="leadsCard" class="card p-6 hidden">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold">Leads</h2>
+        <button id="btnRefresh" class="btn">Refresh</button>
+      </div>
+      <div class="overflow-auto mt-4">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left">
+              <th class="p-2">Name</th>
+              <th class="p-2">Email</th>
+              <th class="p-2">Phone</th>
+              <th class="p-2">Service</th>
+              <th class="p-2">Status</th>
+              <th class="p-2">Created</th>
+              <th class="p-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+<script>
+  const API = (path) => location.origin.replace(/\/admin$/, '') + '/api' + path;
+  const token = () => localStorage.getItem('karba_token') || '';
+
+  const loginCard = document.getElementById('loginCard');
+  const leadsCard = document.getElementById('leadsCard');
+  const userBox = document.getElementById('userBox');
+  const rows = document.getElementById('rows');
+
+  document.getElementById('btnLogin').onclick = async () => {
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    document.getElementById('loginMsg').textContent = '';
+    try {
+      const r = await fetch(API('/auth/login'), {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ email, password })
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Login failed');
+      localStorage.setItem('karba_token', j.token);
+      userBox.textContent = email;
+      loginCard.classList.add('hidden');
+      leadsCard.classList.remove('hidden');
+      loadLeads();
+    } catch(e) {
+      document.getElementById('loginMsg').textContent = e.message;
+    }
+  };
+
+  document.getElementById('btnRefresh').onclick = () => loadLeads();
+
+  async function loadLeads() {
+    rows.innerHTML = '<tr><td class="p-2" colspan="7">Loading...</td></tr>';
+    try {
+      const r = await fetch(API('/leads'), {
+        headers: { 'Authorization': 'Bearer ' + token() }
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Failed');
+      rows.innerHTML = '';
+      for (const lead of j.leads) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="p-2">${lead.fullName}</td>
+          <td class="p-2"><a href="mailto:${lead.email}">${lead.email}</a></td>
+          <td class="p-2"><a href="tel:${lead.phone}">${lead.phone}</a></td>
+          <td class="p-2">${lead.service}</td>
+          <td class="p-2">${lead.status}</td>
+          <td class="p-2">${new Date(lead.createdAt).toLocaleString()}</td>
+          <td class="p-2 flex gap-2">
+            <button class="btn" data-id="${lead._id || ''}" data-status="contacted">Mark Contacted</button>
+            <button class="btn" data-id="${lead._id || ''}" data-status="qualified">Mark Qualified</button>
+            <button class="btn" data-id="${lead._id || ''}" data-status="closed">Mark Closed</button>
+          </td>
+        `;
+        rows.appendChild(tr);
+      }
+      rows.querySelectorAll('button[data-id]').forEach(btn => {
+        btn.onclick = async () => {
+          const id = btn.getAttribute('data-id');
+          const status = btn.getAttribute('data-status');
+          if (!id) { alert('Status updates require MongoDB.'); return; }
+          const r = await fetch(API('/leads/'+id), {
+            method:'PATCH',
+            headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+token() },
+            body: JSON.stringify({ status })
+          });
+          if (r.ok) loadLeads(); else alert('Update failed');
+        };
+      });
+    } catch (e) {
+      rows.innerHTML = '<tr><td class="p-2" colspan="7">Failed to load leads.</td></tr>';
+    }
+  }
+
+  // Auto-show table if token exists
+  if (token()) {
+    userBox.textContent = 'Signed in';
+    loginCard.classList.add('hidden');
+    leadsCard.classList.remove('hidden');
+    loadLeads();
+  }
+</script>
+</body>
+</html>
